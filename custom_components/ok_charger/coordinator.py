@@ -20,6 +20,7 @@ from .const import (
     PRICE_REFRESH_INTERVAL,
     SCAN_INTERVAL,
     SESSION_REFRESH_INTERVAL,
+    STATION_REFRESH_INTERVAL,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -42,6 +43,10 @@ class ChargingStationState:
     # Live state (filled from currentChargings)
     is_charging: bool = False
     charging_token: str | None = None
+    # OK's raw answers, kept for the session/receipt entities and diagnostics
+    raw_station: dict[str, Any] = field(default_factory=dict)
+    raw_connector: dict[str, Any] = field(default_factory=dict)
+    raw_session: dict[str, Any] = field(default_factory=dict)
 
 
 def device_info_for(station: ChargingStationState) -> DeviceInfo:
@@ -86,6 +91,13 @@ class CoordinatorData:
     cheapest_window_avg_ore: int | None = None
     last_session_refresh: dt.datetime | None = None
     last_price_refresh: dt.datetime | None = None
+    last_station_refresh: dt.datetime | None = None
+    # The last finished session: when it ended (as seen here) and OK's receipt for it.
+    last_session: dict[str, Any] = field(default_factory=dict)
+    last_session_ended: dt.datetime | None = None
+    last_receipt: dict[str, Any] = field(default_factory=dict)
+    raw_stations: list[dict[str, Any]] = field(default_factory=list)
+    raw_active: list[dict[str, Any]] = field(default_factory=list)
 
 
 class OkChargerCoordinator(DataUpdateCoordinator[CoordinatorData]):
@@ -182,11 +194,14 @@ class OkChargerCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
     async def _refresh_station(self) -> None:
         stations = await self.client.list_stations()
+        self._data.raw_stations = stations if isinstance(stations, list) else []
+        self._data.last_station_refresh = dt.datetime.now(tz=dt.timezone.utc)
+        previous = self._data.station
         # We only support a single charger today — pick the first one we find.
-        for loc in stations:
+        for loc in self._data.raw_stations:
             for cs in loc.get("chargingStations", []):
                 connector = (cs.get("connectors") or [{}])[0]
-                self._data.station = ChargingStationState(
+                station = ChargingStationState(
                     cs_identifier=cs["csIdentifier"],
                     location_id=loc["locationId"],
                     name=cs.get("name") or cs["csIdentifier"],
@@ -197,27 +212,59 @@ class OkChargerCoordinator(DataUpdateCoordinator[CoordinatorData]):
                     connector_id=connector.get("connectorId", 1),
                     connector_power_kw=connector.get("power", 0),
                     auto_start=cs.get("autoStart", False),
+                    raw_station={k: v for k, v in cs.items() if k != "connectors"},
+                    raw_connector=connector,
                 )
+                if previous is not None and previous.cs_identifier == station.cs_identifier:
+                    # Keep the live session state between station refreshes.
+                    station.is_charging = previous.is_charging
+                    station.charging_token = previous.charging_token
+                    station.raw_session = previous.raw_session
+                self._data.station = station
                 return
         self._data.station = None
+
+    async def _maybe_refresh_station(self) -> None:
+        """The station again now and then: autostart and the connector's status change."""
+        last = self._data.last_station_refresh
+        if self._data.station is None or last is None or dt.datetime.now(tz=dt.timezone.utc) - last >= STATION_REFRESH_INTERVAL:
+            await self._refresh_station()
 
     async def _refresh_charging_state(self) -> None:
         if self._data.station is None:
             return
         active = await self.client.current_chargings()
-        self._data.station.is_charging = False
-        self._data.station.charging_token = None
-        for entry in active:
-            if entry.get("csIdentifier") == self._data.station.cs_identifier:
-                self._data.station.is_charging = True
-                self._data.station.charging_token = entry.get("chargingToken")
+        self._data.raw_active = active if isinstance(active, list) else []
+        station = self._data.station
+        before = (station.is_charging, station.charging_token, station.raw_session)
+        station.is_charging = False
+        station.charging_token = None
+        station.raw_session = {}
+        for entry in self._data.raw_active:
+            if entry.get("csIdentifier") == station.cs_identifier:
+                station.is_charging = True
+                station.charging_token = entry.get("chargingToken")
+                station.raw_session = entry
                 break
+        was_charging, token, session = before
+        if was_charging and token and token != station.charging_token:
+            await self._session_ended(token, session)
+
+    async def _session_ended(self, token: str, session: dict[str, Any]) -> None:
+        """A session ended: keep it, and fetch OK's receipt for it."""
+        self._data.last_session = session
+        self._data.last_session_ended = dt.datetime.now(tz=dt.timezone.utc)
+        try:
+            receipt = await self.client.quick_receipt(token)
+        except OkApiError as exc:
+            _LOGGER.debug("No receipt for the session that ended: %s", exc)
+            receipt = {}
+        self._data.last_receipt = receipt if isinstance(receipt, dict) else {"items": receipt}
 
     async def _async_update_data(self) -> CoordinatorData:
         async with self._lock:
             try:
-                if self._data.station is None:
-                    await self._refresh_station()
+                await self._maybe_refresh_station()
                 await self._maybe_refresh_session()
                 await self._refresh_charging_state()
                 await self._maybe_refresh_prices()
@@ -251,11 +298,30 @@ class OkChargerCoordinator(DataUpdateCoordinator[CoordinatorData]):
         async with self._lock:
             try:
                 await self._maybe_refresh_session()
-                await self.client.stop_charge(self._data.station.charging_token)
+                station = self._data.station
+                token, session = station.charging_token, station.raw_session
+                assert token is not None
+                await self.client.stop_charge(token)
+                station.is_charging = False
+                station.charging_token = None
+                station.raw_session = {}
+                await self._session_ended(token, session)
             except OkApiError as exc:
                 raise UpdateFailed(str(exc)) from exc
-        self._data.station.is_charging = False
-        self._data.station.charging_token = None
+        self.async_set_updated_data(self._data)
+
+    async def async_set_autostart(self, enabled: bool) -> None:
+        """Turn OK's autostart on or off: whether the charger starts a session when a car is plugged in."""
+        if self._data.station is None:
+            raise UpdateFailed("No charging station available")
+        async with self._lock:
+            try:
+                await self._maybe_refresh_session()
+                await self.client.set_autostart(self._data.station.cs_identifier, enabled)
+                self._data.station.auto_start = enabled
+                await self._refresh_station()
+            except OkApiError as exc:
+                raise UpdateFailed(str(exc)) from exc
         self.async_set_updated_data(self._data)
 
     async def async_invalidate_window(self) -> None:

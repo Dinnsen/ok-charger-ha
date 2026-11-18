@@ -41,6 +41,7 @@ CONF_DEVICE_FRIENDLY_ID = "device_friendly_id"
 SCAN_INTERVAL = timedelta(seconds=30)
 PRICE_REFRESH_INTERVAL = timedelta(minutes=15)
 SESSION_REFRESH_INTERVAL = timedelta(minutes=10)
+STATION_REFRESH_INTERVAL = timedelta(minutes=2)
 
 # How many cheapest hours to find for the auto-charge sensor
 DEFAULT_CHEAP_HOURS = 4

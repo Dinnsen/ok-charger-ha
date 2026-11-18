@@ -16,6 +16,18 @@ After setup, your OK-leased charger appears as a Home Assistant device with:
 
 That's enough primitives to write a one-automation "charge at the cheapest hours of the night when a car is plugged in" rule.
 
+## This fork (Dinnsen/ok-charger-ha)
+
+Adds to the original, for OK chargers of any make (tested with an **EVBox Elvi G4**):
+
+- **Switch: Autostart** — OK's autostart: the charger starts a session by itself when a car is plugged in
+- **Sensor: Session** — when OK's open session started; everything OK says about it as attributes
+- **Sensor: Connector** — the connector's status as OK reports it (diagnostic, refreshed every 2 minutes)
+- **Sensor: Last session** and **Last session energy** — when the last session ended, with OK's receipt (kWh and price when OK sends them)
+- **Diagnostics** — OK's raw answers with email, password, tokens, device ids and addresses hidden: Settings → Devices & services → OK Charger → ⋮ → Download diagnostics
+
+OK's API is not documented, so the session and receipt fields are read by name where they can be found and otherwise kept as attributes.
+
 ## Installation
 
 ### Via HACS (recommended)

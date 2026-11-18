@@ -10,10 +10,12 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory, UnitOfEnergy
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from . import raw
 from .const import DOMAIN
 from .coordinator import OkChargerCoordinator, device_info_for
 
@@ -31,6 +33,10 @@ async def async_setup_entry(
             CheapestWindowEndSensor(coordinator),
             CheapestWindowPriceSensor(coordinator),
             ChargingStateSensor(coordinator),
+            SessionSensor(coordinator),
+            ConnectorSensor(coordinator),
+            LastSessionSensor(coordinator),
+            LastEnergySensor(coordinator),
         ]
     )
 
@@ -135,3 +141,99 @@ class ChargingStateSensor(_OkSensorBase):
         if station is None:
             return None
         return "charging" if station.is_charging else "idle"
+
+
+class SessionSensor(_OkSensorBase):
+    """The session OK has open on the charger: when it started, with everything OK says about it."""
+
+    _attr_name = "Session"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_icon = "mdi:ev-station"
+
+    def __init__(self, coordinator: OkChargerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._station_id}_session"
+
+    @property
+    def native_value(self) -> dt.datetime | None:
+        station = self.coordinator.data.station
+        if station is None or not station.is_charging:
+            return None
+        return raw.started(station.raw_session)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        station = self.coordinator.data.station
+        session = station.raw_session if station else {}
+        return {"active": bool(station and station.is_charging), **raw.flatten(session)}
+
+
+class ConnectorSensor(_OkSensorBase):
+    """The connector as OK sees it (refreshed every two minutes)."""
+
+    _attr_name = "Connector"
+    _attr_icon = "mdi:ev-plug-type2"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: OkChargerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._station_id}_connector"
+
+    @property
+    def native_value(self) -> str | None:
+        station = self.coordinator.data.station
+        if station is None:
+            return None
+        return raw.status(station.raw_connector) or raw.status(station.raw_station)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        station = self.coordinator.data.station
+        if station is None:
+            return {}
+        return {**raw.flatten(station.raw_station, "station_"), **raw.flatten(station.raw_connector, "connector_")}
+
+
+class LastSessionSensor(_OkSensorBase):
+    """When the last session ended, with the session and OK's receipt for it."""
+
+    _attr_name = "Last session"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_icon = "mdi:receipt-text-outline"
+
+    def __init__(self, coordinator: OkChargerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._station_id}_last_session"
+
+    @property
+    def native_value(self) -> dt.datetime | None:
+        data = self.coordinator.data
+        return raw.ended(data.last_receipt) or data.last_session_ended
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        data = self.coordinator.data
+        return {
+            "started": raw.started(data.last_receipt) or raw.started(data.last_session),
+            "energy_kwh": raw.energy(data.last_receipt),
+            "cost": raw.cost(data.last_receipt),
+            **raw.flatten(data.last_session, "session_"),
+            **raw.flatten(data.last_receipt, "receipt_"),
+        }
+
+
+class LastEnergySensor(_OkSensorBase):
+    """The energy on OK's receipt for the last session."""
+
+    _attr_name = "Last session energy"
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+    _attr_icon = "mdi:lightning-bolt"
+
+    def __init__(self, coordinator: OkChargerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._station_id}_last_energy"
+
+    @property
+    def native_value(self) -> float | None:
+        return raw.energy(self.coordinator.data.last_receipt)

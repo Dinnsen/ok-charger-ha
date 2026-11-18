@@ -1,14 +1,17 @@
 {
   "domain": "ok_charger",
   "name": "OK Charger",
-  "codeowners": ["@dotbear"],
+  "codeowners": [
+    "@dotbear",
+    "@Dinnsen"
+  ],
   "config_flow": true,
   "dependencies": [],
-  "documentation": "https://github.com/dotbear/ok-charger-ha",
+  "documentation": "https://github.com/Dinnsen/ok-charger-ha",
   "homeassistant": "2024.10.0",
   "integration_type": "device",
   "iot_class": "cloud_polling",
-  "issue_tracker": "https://github.com/dotbear/ok-charger-ha/issues",
+  "issue_tracker": "https://github.com/Dinnsen/ok-charger-ha/issues",
   "requirements": [],
-  "version": "0.1.0"
+  "version": "0.2.0"
 }
