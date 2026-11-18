@@ -12,12 +12,15 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
+from . import raw
 from .api import OkApiError, OkAuthError, OkChargerClient
 from .const import (
     CHARGE_DEADLINE_HOUR,
     DEFAULT_CHEAP_HOURS,
     DOMAIN,
     PRICE_REFRESH_INTERVAL,
+    RECEIPT_RETRY,
+    RECEIPT_TRIES,
     SCAN_INTERVAL,
     SESSION_REFRESH_INTERVAL,
     STATION_REFRESH_INTERVAL,
@@ -97,6 +100,10 @@ class CoordinatorData:
     last_session: dict[str, Any] = field(default_factory=dict)
     last_session_ended: dt.datetime | None = None
     last_receipt: dict[str, Any] = field(default_factory=dict)
+    # The ended session's token, to fetch its receipt again until it is final.
+    last_token: str | None = None
+    receipt_tries: int = 0
+    receipt_fetched: dt.datetime | None = None
     raw_stations: list[dict[str, Any]] = field(default_factory=list)
     raw_active: list[dict[str, Any]] = field(default_factory=list)
 
@@ -255,12 +262,36 @@ class OkChargerCoordinator(DataUpdateCoordinator[CoordinatorData]):
         """A session ended: keep it, and fetch OK's receipt for it."""
         self._data.last_session = session
         self._data.last_session_ended = dt.datetime.now(tz=dt.timezone.utc)
+        self._data.last_token = token
+        self._data.receipt_tries = 0
+        self._data.last_receipt = {}
+        await self._fetch_receipt()
+
+    async def _fetch_receipt(self) -> None:
+        data = self._data
+        if not data.last_token:
+            return
+        data.receipt_tries += 1
+        data.receipt_fetched = dt.datetime.now(tz=dt.timezone.utc)
         try:
-            receipt = await self.client.quick_receipt(token)
+            receipt = await self.client.quick_receipt(data.last_token)
         except OkApiError as exc:
             _LOGGER.debug("No receipt for the session that ended: %s", exc)
-            receipt = {}
-        self._data.last_receipt = receipt if isinstance(receipt, dict) else {"items": receipt}
+            return
+        data.last_receipt = receipt if isinstance(receipt, dict) else {"items": receipt}
+
+    async def _maybe_refresh_receipt(self) -> None:
+        """The receipt again until OK has closed it: the first one is fetched before the last meter reading."""
+        data = self._data
+        if (
+            not data.last_token
+            or raw.ended(data.last_receipt) is not None
+            or data.receipt_tries >= RECEIPT_TRIES
+            or data.receipt_fetched is None
+            or dt.datetime.now(tz=dt.timezone.utc) - data.receipt_fetched < RECEIPT_RETRY
+        ):
+            return
+        await self._fetch_receipt()
 
     async def _async_update_data(self) -> CoordinatorData:
         async with self._lock:
@@ -268,6 +299,7 @@ class OkChargerCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 await self._maybe_refresh_station()
                 await self._maybe_refresh_session()
                 await self._refresh_charging_state()
+                await self._maybe_refresh_receipt()
                 await self._maybe_refresh_prices()
             except OkApiError as exc:
                 raise UpdateFailed(str(exc)) from exc

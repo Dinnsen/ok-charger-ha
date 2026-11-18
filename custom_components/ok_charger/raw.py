@@ -154,5 +154,17 @@ def energy(entry: Any) -> float | None:
     return parse_number(_find(entry, ENERGY_KEYS))
 
 
+def receipt_energy(receipt: Any) -> float | None:
+    """The energy on OK's receipt in kWh.
+
+    OK's quick receipt names its figure "kWh" but sends watt-hours: 705 for a session in which
+    the car took about 1.4 kWh. Other names are read as kWh.
+    """
+    if isinstance(receipt, dict) and "kWh" in receipt:
+        value = parse_number(receipt["kWh"])
+        return None if value is None else round(value / 1000, 3)
+    return energy(receipt)
+
+
 def cost(entry: Any) -> float | None:
     return parse_number(_find(entry, COST_KEYS))

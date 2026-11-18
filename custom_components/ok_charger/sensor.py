@@ -215,7 +215,8 @@ class LastSessionSensor(_OkSensorBase):
         data = self.coordinator.data
         return {
             "started": raw.started(data.last_receipt) or raw.started(data.last_session),
-            "energy_kwh": raw.energy(data.last_receipt),
+            "energy_kwh": raw.receipt_energy(data.last_receipt),
+            "final": raw.ended(data.last_receipt) is not None,
             "cost": raw.cost(data.last_receipt),
             **raw.flatten(data.last_session, "session_"),
             **raw.flatten(data.last_receipt, "receipt_"),
@@ -236,4 +237,4 @@ class LastEnergySensor(_OkSensorBase):
 
     @property
     def native_value(self) -> float | None:
-        return raw.energy(self.coordinator.data.last_receipt)
+        return raw.receipt_energy(self.coordinator.data.last_receipt)

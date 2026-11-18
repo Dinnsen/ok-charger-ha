@@ -50,3 +50,10 @@ def test_fields_are_found_by_any_known_name_and_nested_once() -> None:
     assert raw.ended(session) is None
     assert raw.cost({"totalPrice": 33.03}) == 33.03
     assert raw.status({"state": {"x": 1}}) is None
+
+
+def test_receipt_energy_is_sent_in_watt_hours() -> None:
+    assert raw.receipt_energy({"kWh": 705, "chargingEnd": None}) == 0.705
+    assert raw.receipt_energy({"kWh": 0}) == 0.0
+    assert raw.receipt_energy({"energy": 3.2}) == 3.2
+    assert raw.receipt_energy({}) is None

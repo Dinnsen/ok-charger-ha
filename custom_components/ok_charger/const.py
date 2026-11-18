@@ -55,3 +55,8 @@ CHARGE_DEADLINE_HOUR = 8
 
 # OK's answer to a stop it will not do ("end it from the car or by unplugging").
 STOP_REFUSED_CODE = "200201"
+
+# OK's receipt is fetched when a session ends, before OK has the charger's last meter reading:
+# it is fetched again this often, until it has an end time (at most this many times).
+RECEIPT_RETRY = timedelta(minutes=2)
+RECEIPT_TRIES = 15
