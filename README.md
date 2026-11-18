@@ -28,6 +28,11 @@ Adds to the original, for OK chargers of any make (tested with an **EVBox Elvi G
 
 OK's API is not documented, so the session and receipt fields are read by name where they can be found and otherwise kept as attributes.
 
+Learned on an EVBox Elvi G4:
+
+- OK stops a session from the app (the **Charge** switch off) only while **Autostart** is off. With Autostart on, OK answers "end it from the car or by unplugging".
+- OK's receipt is not final when the session ends: it is fetched again every 2 minutes until it has an end time. Its `kWh` figure is in watt-hours; **Last session energy** shows it in kWh.
+
 ## Installation
 
 ### Via HACS (recommended)
