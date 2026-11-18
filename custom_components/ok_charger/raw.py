@@ -24,6 +24,7 @@ SECRET_PARTS = (
     "zip",
     "postal",
     "city",
+    "locationname",
     "phone",
     "telefon",
     "latitude",

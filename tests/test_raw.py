@@ -19,12 +19,14 @@ def test_secrets_are_hidden_at_any_depth() -> None:
         "chargingToken": "t",
         "location": {"streetAddress": "Vej 1", "name": "Hjem"},
         "list": [{"deviceId": "d", "kwh": 3}],
+        "receipt": {"locationName": "Vej 1", "chargingStationName": "Min OK", "locationId": "u"},
     }
     out = raw.redact(data)
     assert out["email"] == out["app_id"] == out["chargingToken"] == "**redacted**"
     assert out["location"]["streetAddress"] == "**redacted**"
     assert out["location"]["name"] == "Hjem"
     assert out["list"][0] == {"deviceId": "**redacted**", "kwh": 3}
+    assert out["receipt"] == {"locationName": "**redacted**", "chargingStationName": "Min OK", "locationId": "u"}
 
 
 def test_flatten_leaves_secrets_out_and_counts_lists_of_dicts() -> None:

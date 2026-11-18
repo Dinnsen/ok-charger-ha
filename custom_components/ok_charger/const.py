@@ -52,3 +52,6 @@ DEFAULT_CHEAP_HOURS = 4
 # stops the optimizer from picking tomorrow's daytime solar valley when
 # the user actually wants to charge overnight.
 CHARGE_DEADLINE_HOUR = 8
+
+# OK's answer to a stop it will not do ("end it from the car or by unplugging").
+STOP_REFUSED_CODE = "200201"

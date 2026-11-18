@@ -21,6 +21,7 @@ from .const import (
     SCAN_INTERVAL,
     SESSION_REFRESH_INTERVAL,
     STATION_REFRESH_INTERVAL,
+    STOP_REFUSED_CODE,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -307,6 +308,11 @@ class OkChargerCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 station.raw_session = {}
                 await self._session_ended(token, session)
             except OkApiError as exc:
+                if STOP_REFUSED_CODE in str(exc) and station.auto_start:
+                    # Seen on an EVBox Elvi: OK stops a session from the app only while autostart is off.
+                    raise UpdateFailed(
+                        f"OK refuses to stop while Autostart is on; turn Autostart off first ({exc})"
+                    ) from exc
                 raise UpdateFailed(str(exc)) from exc
         self.async_set_updated_data(self._data)
 
